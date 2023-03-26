@@ -126,4 +126,7 @@ venv.bak/
 dmypy.json
 
 # Pyre type checker
+
+# Circuit Python settings
+settings.toml
 .pyre/
