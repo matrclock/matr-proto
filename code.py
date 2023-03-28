@@ -40,9 +40,11 @@ matrix = rgbmatrix.RGBMatrix(
 # Associate matrix with a Display to use displayio features
 DISPLAY = framebufferio.FramebufferDisplay(matrix, auto_refresh=True,
                                            rotation=180)
+# Right side up
+DISPLAY.rotation = 0
 
-# Load BMP image, create Group and TileGrid to hold it
-BITMAP = displayio.OnDiskBitmap(open('images/Word.bmp', 'rb'))
+
+# Load GIF image, create Group and TileGrid to hold it
 GIF = gifio.OnDiskGif('images/mario.gif')
 
 start = time.monotonic()
