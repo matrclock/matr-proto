@@ -1,3 +1,5 @@
+import struct
+
 def read_blockstream(f):
     while True:
         size = f.read(1)[0]
@@ -5,6 +7,7 @@ def read_blockstream(f):
             break
         for i in range(size):
             yield f.read(1)[0]
+
 
 
 class EndOfData(Exception):
@@ -48,20 +51,24 @@ class LZWDict:
 def lzw_decode(data, code_size):
     dictionary = LZWDict(code_size)
     bit = 0
-    byte = next(data)
-    try:
-        while True:
-            code = 0
-            for i in range(dictionary.code_len):
-                code |= ((byte >> bit) & 0x01) << i
-                bit += 1
-                if bit >= 8:
-                    bit = 0
-                    byte = next(data)
-            yield dictionary.decode(code)
-    except EndOfData:
-        while True:
-            next(data)
+    try: 
+        byte = next(data)
+        try:
+            while True:
+                code = 0
+                for i in range(dictionary.code_len):
+                    code |= ((byte >> bit) & 0x01) << i
+                    bit += 1
+                    if bit >= 8:
+                        bit = 0
+                        byte = next(data)
+                yield dictionary.decode(code)
+
+        except EndOfData:
+            while True:
+                next(data)
+    except StopIteration:
+        pass
 
 
 class Extension:
@@ -88,13 +95,19 @@ class Frame:
         self.bitmap = self.bitmap_class(self.w, self.h, colors)
         x = 0
         y = 0
-        for decoded in lzw_decode(read_blockstream(f), self.min_code_sz):
+
+        # blockstream is fine, decoded_blockstream has an issue
+        blockstream = read_blockstream(f)
+        decoded_blockstream = lzw_decode(blockstream, self.min_code_sz)
+
+        for decoded in decoded_blockstream:
             for byte in decoded:
                 self.bitmap[x, y] = byte
                 x += 1
                 if (x >= self.w):
                     x = 0
                     y += 1
+
 
     def read_palette(self, f):
         self.palette = self.palette_class(self.palette_size)
