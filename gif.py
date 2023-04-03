@@ -1,3 +1,4 @@
+# Currently only supports a single frame in the frames array
 import struct
 
 def read_blockstream(f):
@@ -108,7 +109,6 @@ class Frame:
                     x = 0
                     y += 1
 
-
     def read_palette(self, f):
         self.palette = self.palette_class(self.palette_size)
         for i in range(self.palette_size):
@@ -126,14 +126,12 @@ class GIFImage:
         self.extensions = []
         while True:
             block_type = f.read(1)[0]
-            if block_type == 0x3b:
+            if block_type == 0x3b: # Trailer indicating the end of the GIF Data Stream
                 break
-            elif block_type == 0x2c:
-                self.frames.append(
-                    Frame(f, self.bitmap_class, self.palette_class,
-                          self.palette_size))
-                # XXX only read the first frame for now
-                break
+            elif block_type == 0x2c: # Image Descriptor / Image Separator
+                frame =  Frame(f, self.bitmap_class, self.palette_class,
+                          self.palette_size)
+                self.frames.append(frame)
             elif block_type == 0x21:
                 self.extensions.append(Extension(f))
             else:

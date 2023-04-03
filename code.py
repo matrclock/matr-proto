@@ -62,31 +62,36 @@ group.append(grid)
 '''
 
 # Associate matrix with a Display to use displayio features
-DISPLAY = framebufferio.FramebufferDisplay(matrix, auto_refresh=True)
+DISPLAY = framebufferio.FramebufferDisplay(matrix)
 # GIF = gifio.OnDiskGif('images/mario.gif')
 with open("images/mario.gif", 'rb') as f:
     GIF = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
 
-print('GIF OPENED!')
 #start = time.monotonic()
 #next_delay = GIF.next_frame()
 #end = time.monotonic()
 #overhead = end - start
+GIF.bitmap = GIF.frames[0].bitmap
 
 GROUP = displayio.Group()
-GROUP.append(displayio.TileGrid(
-    #GIF.bitmap, pixel_shader=displayio.ColorConverter(input_colorspace=displayio.Colorspace.RGB565_SWAPPED),  
-    GIF.frames[0].bitmap, pixel_shader=GIF.palette,
+TILEGRID = displayio.TileGrid(
+    GIF.bitmap, pixel_shader=GIF.palette,
     width=width_value,
     height=height_value,
-))
+)
+GROUP.append(TILEGRID)
 
 DISPLAY.show(GROUP)
 DISPLAY.refresh()
 
 while True:
+    sleep = 1
+    time.sleep(max(0, sleep))
+    TILEGRID.bitmap = GIF.frames[1].bitmap
+    time.sleep(max(0, sleep))
+    TILEGRID.bitmap = GIF.frames[2].bitmap
     pass
-    #sleep = next_delay - overhead
+
     #time.sleep(max(0, sleep))
     #next_delay = GIF.next_frame()
 
