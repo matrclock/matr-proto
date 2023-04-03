@@ -1,5 +1,5 @@
 {
-    "deploy": {
+    "deploy.reloaded": {
         "packages": [
             {
                 "name": "Matr 1",
@@ -9,7 +9,9 @@
                     "**/*.mpy",
                     "images/*"
                 ],
-                "deployOnSave": true
+                "deployOnSave": true,
+                "removeOnChange": ["Circuit Python"]
+
             }
         ],
         "targets": [
@@ -30,7 +32,7 @@
     "python.analysis.extraPaths": [
         "/Users/flip/.vscode/extensions/joedevivo.vscode-circuitpython-0.1.20-darwin-x64/boards/0x239A/0x8120",
         "/Users/flip/.vscode/extensions/joedevivo.vscode-circuitpython-0.1.20-darwin-x64/stubs",
-        "/Users/flip/Library/Application Support/Code/User/globalStorage/joedevivo.vscode-circuitpython/bundle/20230328/adafruit-circuitpython-bundle-py-20230328/lib"
+        "/Users/flip/Library/Application Support/Code/User/globalStorage/joedevivo.vscode-circuitpython/bundle/20230402/adafruit-circuitpython-bundle-py-20230402/lib"
     ],
     "circuitpython.board.version": "7.1.1",
     "circuitpython.board.vid": "0x239A",

@@ -7,12 +7,31 @@
 import board
 import displayio
 import gifio
+import storage
 import framebufferio
 import rgbmatrix
 import time
+import wifi
+import socketpool
+from gif import GIFImage
+import microcontroller
+import adafruit_requests 
+
 from digitalio import DigitalInOut, Direction
 
 
+pool = socketpool.SocketPool(wifi.radio)
+requests = adafruit_requests.Session(pool)
+
+GIF_URL = "http://192.168.1.10:8000"
+print()
+print("Fetching GIF from", GIF_URL)
+r = requests.get(GIF_URL)
+# print(r.content)
+
+r.close()
+print("-" * 40)
+print("-" * 40)
 
 bit_depth_value = 6 # 6 bits is the max
 width_value = 64
@@ -36,15 +55,15 @@ matrix = rgbmatrix.RGBMatrix(
     clock_pin=board.GP11, latch_pin=board.GP12, output_enable_pin=board.GP13,
     doublebuffer=True)
 
+'''
+with open("images/mario.gif", 'rb') as f:
+    GIF = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
+grid = displayio.TileGrid(gif.frames[0].bitmap, pixel_shader=gif.palette)
+group.append(grid)
+'''
 
 # Associate matrix with a Display to use displayio features
-DISPLAY = framebufferio.FramebufferDisplay(matrix, auto_refresh=True,
-                                           rotation=180)
-# Right side up
-DISPLAY.rotation = 0
-
-
-# Load GIF image, create Group and TileGrid to hold it
+DISPLAY = framebufferio.FramebufferDisplay(matrix, auto_refresh=True)
 GIF = gifio.OnDiskGif('images/mario.gif')
 
 start = time.monotonic()
@@ -53,15 +72,6 @@ end = time.monotonic()
 overhead = end - start
 
 GROUP = displayio.Group()
-"""
-GROUP.append(displayio.TileGrid(
-    BITMAP,
-    pixel_shader=getattr(BITMAP, 'pixel_shader', displayio.ColorConverter()),
-    width=1,
-    height=1,
-    tile_width=BITMAP.width,
-    tile_height=BITMAP.height))
-"""
 GROUP.append(displayio.TileGrid(
     GIF.bitmap,
     pixel_shader=displayio.ColorConverter(
@@ -74,15 +84,9 @@ GROUP.append(displayio.TileGrid(
 DISPLAY.show(GROUP)
 DISPLAY.refresh()
 
-i = 0
-# Nothing interactive, just hold the image there
 while True:
-    # Sleep for the frame delay specified by the GIF,
-    # minus the overhead measured to advance between frames.
     sleep = next_delay - overhead
-    print("Sleeping:", sleep, i)
     time.sleep(max(0, sleep))
     next_delay = GIF.next_frame()
-    i = i+1
 
 
