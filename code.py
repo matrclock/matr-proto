@@ -56,27 +56,27 @@ matrix = rgbmatrix.RGBMatrix(
     doublebuffer=True)
 
 '''
-with open("images/mario.gif", 'rb') as f:
-    GIF = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
+
 grid = displayio.TileGrid(gif.frames[0].bitmap, pixel_shader=gif.palette)
 group.append(grid)
 '''
 
 # Associate matrix with a Display to use displayio features
 DISPLAY = framebufferio.FramebufferDisplay(matrix, auto_refresh=True)
-GIF = gifio.OnDiskGif('images/mario.gif')
+# GIF = gifio.OnDiskGif('images/mario.gif')
+with open("images/mario.gif", 'rb') as f:
+    GIF = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
 
-start = time.monotonic()
-next_delay = GIF.next_frame()
-end = time.monotonic()
-overhead = end - start
+print('GIF OPENED!')
+#start = time.monotonic()
+#next_delay = GIF.next_frame()
+#end = time.monotonic()
+#overhead = end - start
 
 GROUP = displayio.Group()
 GROUP.append(displayio.TileGrid(
-    GIF.bitmap,
-    pixel_shader=displayio.ColorConverter(
-        input_colorspace=displayio.Colorspace.RGB565_SWAPPED
-    ),    
+    #GIF.bitmap, pixel_shader=displayio.ColorConverter(input_colorspace=displayio.Colorspace.RGB565_SWAPPED),  
+    GIF.frames[0].bitmap, pixel_shader=GIF.palette,
     width=width_value,
     height=height_value,
 ))
@@ -85,8 +85,9 @@ DISPLAY.show(GROUP)
 DISPLAY.refresh()
 
 while True:
-    sleep = next_delay - overhead
-    time.sleep(max(0, sleep))
-    next_delay = GIF.next_frame()
+    pass
+    #sleep = next_delay - overhead
+    #time.sleep(max(0, sleep))
+    #next_delay = GIF.next_frame()
 
 
