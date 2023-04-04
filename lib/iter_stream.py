@@ -1,8 +1,10 @@
+import gc
 
 class IterStream:
     def __init__(self,iterable):
         self._iter = iterable
-        self._left = ''
+        self._left = b''
+        self._l_buffer = []
     def readable(self):
         return True
 
@@ -17,7 +19,9 @@ class IterStream:
         return ret
 
     def read(self, n=None):
-        l = []
+        # This is wonky, but I think it helps reduce memory fragmentation?
+        l = self._l_buffer
+        l.clear()
         if n is None or n < 0:
             while True:
                 m = self.read1()
