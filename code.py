@@ -1,37 +1,18 @@
-# Minimal example displaying an image tiled across multiple RGB LED matrices.
-# This is written for MatrixPortal and four 64x32 pixel matrices, but could
-# be adapted to different boards and matrix combinations.
-# No additional libraries required, just uses displayio.
-# Image wales.bmp should be in CIRCUITPY root directory.
-
 import board
 import displayio
-import gifio
-import storage
 import framebufferio
 import rgbmatrix
 import time
-import wifi
-import socketpool
+import struct
+from wifi import radio
+from socketpool import SocketPool
 from gif import GIFImage
-import microcontroller
+from lib.iter_stream import IterStream
 import adafruit_requests 
+import gc
+print('RAM ON BOOT:', gc.mem_free())
 
-from digitalio import DigitalInOut, Direction
-
-
-pool = socketpool.SocketPool(wifi.radio)
-requests = adafruit_requests.Session(pool)
-
-GIF_URL = "http://192.168.1.10:8000"
-print()
-print("Fetching GIF from", GIF_URL)
-r = requests.get(GIF_URL)
-# print(r.content)
-
-r.close()
-print("-" * 40)
-print("-" * 40)
+requests = adafruit_requests.Session(SocketPool(radio))
 
 bit_depth_value = 6 # 6 bits is the max
 width_value = 64
@@ -39,60 +20,66 @@ height_value = 32
 
 displayio.release_displays() # Release current display, we'll create our own
 
-# Create RGB matrix object for a chain of four 64x32 matrices tiled into
-# a single 128x64 pixel display -- two matrices across, two down, with the
-# second row being flipped. width and height args are the combined size of
-# all the tiled sub-matrices. tile arg is the number of rows of matrices in
-# the chain (horizontal tiling is implicit from the width argument, doesn't
-# need to be specified, but vertical tiling must be explicitly stated).
-# The serpentine argument indicates whether alternate rows are flipped --
-# cabling is easier this way, downside is colors may be slightly different
-# when viewed off-angle. bit_depth and pins are same as other examples.
-matrix = rgbmatrix.RGBMatrix(
+MATRIX = rgbmatrix.RGBMatrix(
     width=width_value, height=height_value, bit_depth=bit_depth_value,
     rgb_pins=[board.GP2, board.GP3, board.GP4, board.GP5, board.GP8, board.GP9],
     addr_pins=[board.GP10, board.GP16, board.GP18, board.GP20],
     clock_pin=board.GP11, latch_pin=board.GP12, output_enable_pin=board.GP13,
     doublebuffer=True)
 
-'''
-
-grid = displayio.TileGrid(gif.frames[0].bitmap, pixel_shader=gif.palette)
-group.append(grid)
-'''
-
 # Associate matrix with a Display to use displayio features
-DISPLAY = framebufferio.FramebufferDisplay(matrix)
-# GIF = gifio.OnDiskGif('images/mario.gif')
-with open("images/mario.gif", 'rb') as f:
-    GIF = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
 
-#start = time.monotonic()
-#next_delay = GIF.next_frame()
-#end = time.monotonic()
-#overhead = end - start
-GIF.bitmap = GIF.frames[0].bitmap
+GIF_URL = "http://192.168.1.10:8000"
+r = requests.request("GET", GIF_URL)
+IN_MEM_GIF = IterStream(r.iter_content(256))
+#IN_MEM_GIF = io.BytesIO(r.content)
+#r.close()
+
+GIF = GIFImage(IN_MEM_GIF, bitmap=displayio.Bitmap, palette=displayio.Palette)
+
+DISPLAY = framebufferio.FramebufferDisplay(MATRIX, auto_refresh=True)
 
 GROUP = displayio.Group()
 TILEGRID = displayio.TileGrid(
-    GIF.bitmap, pixel_shader=GIF.palette,
-    width=width_value,
-    height=height_value,
+    displayio.Bitmap(64,32,1), pixel_shader=GIF.palette,
+    width=1,
+    height=1,
 )
-GROUP.append(TILEGRID)
 
+GROUP.append(TILEGRID)
 DISPLAY.show(GROUP)
 DISPLAY.refresh()
 
-while True:
-    sleep = 1
-    time.sleep(max(0, sleep))
-    TILEGRID.bitmap = GIF.frames[1].bitmap
-    time.sleep(max(0, sleep))
-    TILEGRID.bitmap = GIF.frames[2].bitmap
-    pass
 
-    #time.sleep(max(0, sleep))
-    #next_delay = GIF.next_frame()
+
+while True:
+    while GIF.has_more_frames:
+
+        start = time.monotonic()
+
+        delay = GIF.read_next_frame(IN_MEM_GIF)
+        TILEGRID.bitmap = GIF.frame.bitmap
+        mem_before = gc.mem_free()
+        gc.collect()
+        print(mem_before, '>', gc.mem_free())
+
+        end = time.monotonic()
+        overhead = end - start
+        print("overhead", overhead)
+
+        time.sleep(max(0, (delay / 1000) - overhead))
+
+       
+
+
+        """
+        r = requests.get(GIF_URL)
+        print('fetching a rug')
+        GIF = GIFImage(io.BytesIO(r.content), bitmap=displayio.Bitmap, palette=displayio.Palette)
+        r.close()
+        """
+
+
+
 
 

@@ -1,4 +1,3 @@
-# Currently only supports a single frame in the frames array
 import struct
 
 def read_blockstream(f):
@@ -9,11 +8,8 @@ def read_blockstream(f):
         for i in range(size):
             yield f.read(1)[0]
 
-
-
 class EndOfData(Exception):
     pass
-
 
 class LZWDict:
     def __init__(self, code_size):
@@ -48,7 +44,6 @@ class LZWDict:
         self.last = value
         return value
 
-
 def lzw_decode(data, code_size):
     dictionary = LZWDict(code_size)
     bit = 0
@@ -71,18 +66,17 @@ def lzw_decode(data, code_size):
     except StopIteration:
         pass
 
-
 class Extension:
     def __init__(self,f):
-        self.extension_type = f.read(1)[0]
+        self.type = f.read(1)[0]
         # 0x01 = label, 0xfe = comment
         self.data = bytes(read_blockstream(f))
 
-
 class Frame:
-    def __init__(self, f, bitmap, palette, colors):
+    def __init__(self, f, bitmap, palette, colors, delay):
         self.bitmap_class = bitmap
         self.palette_class = palette
+        self.delay = delay
         self.x, self.y, self.w, self.h, flags = (
             struct.unpack('<HHHHB', f.read(9)))
         self.palette_flag = (flags & 0x80) != 0
@@ -97,11 +91,7 @@ class Frame:
         x = 0
         y = 0
 
-        # blockstream is fine, decoded_blockstream has an issue
-        blockstream = read_blockstream(f)
-        decoded_blockstream = lzw_decode(blockstream, self.min_code_sz)
-
-        for decoded in decoded_blockstream:
+        for decoded in lzw_decode(read_blockstream(f), self.min_code_sz):
             for byte in decoded:
                 self.bitmap[x, y] = byte
                 x += 1
@@ -114,7 +104,6 @@ class Frame:
         for i in range(self.palette_size):
             self.palette[i] = f.read(3)
 
-
 class GIFImage:
     def __init__(self, f, bitmap, palette):
         self.bitmap_class = bitmap
@@ -122,20 +111,30 @@ class GIFImage:
         self.read_header(f)
         if self.palette_flag:
             self.read_palette(f)
-        self.frames = []
-        self.extensions = []
+        self.has_more_frames = True
+    
+    def read_next_frame(self, f):
+        if self.has_more_frames != True:
+            return
+        
+        delay = 0
         while True:
             block_type = f.read(1)[0]
-            if block_type == 0x3b: # Trailer indicating the end of the GIF Data Stream
+            if block_type == 0x21: # This preceeds the frame. We're looking for extension 249 to get the delay
+                extension = Extension(f)
+                if extension.type == 249:
+                    delay = extension.data[1] * 10 # GIF encoding uses hundredths of a second, but everyone else uses thousandths 
+
+            elif block_type == 0x2c: # Image Descriptor / Image Separator  
+                self.frame = Frame(f, self.bitmap_class, self.palette_class,
+                          self.palette_size, delay)
                 break
-            elif block_type == 0x2c: # Image Descriptor / Image Separator
-                frame =  Frame(f, self.bitmap_class, self.palette_class,
-                          self.palette_size)
-                self.frames.append(frame)
-            elif block_type == 0x21:
-                self.extensions.append(Extension(f))
+            elif block_type == 0x3b: # Trailer indicating the end of the GIF Data Stream
+                self.has_more_frames = False
+                break
             else:
                 raise ValueError('Bad block {0:2x}'.format(block_type))
+        return delay
 
     def read_palette(self, f):
         self.palette = self.palette_class(self.palette_size)
