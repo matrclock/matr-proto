@@ -3,7 +3,6 @@ import displayio
 import framebufferio
 import rgbmatrix
 import time
-import struct
 from wifi import radio
 from socketpool import SocketPool
 from gif import GIFImage
@@ -47,21 +46,31 @@ GROUP.append(TILEGRID)
 DISPLAY.show(GROUP)
 DISPLAY.refresh()
 
-def play_next_frame(gif, gif_stream):
-    start = time.monotonic()
-
-    delay = gif.read_next_frame(gif_stream)
-    TILEGRID.bitmap = gif.frame.bitmap
-    TILEGRID.pixel_shader = gif.palette
+def collect():
     mem_before = gc.mem_free()
     gc.collect()
     print(mem_before, '>', gc.mem_free())
 
+def play_next_frame(gif, gif_stream):
+    start = time.monotonic()
+
+    delay = 0
+    try:
+        delay = gif.read_next_frame(gif_stream)
+        TILEGRID.bitmap = gif.frame.bitmap
+        TILEGRID.pixel_shader = gif.palette
+    except MemoryError:
+        print('Unknown MemoryError. Collecting and restarting!', gc.mem_free())
+        collect()
+        get_and_play()
+
+    collect()
     end = time.monotonic()
     overhead = end - start
-    print("overhead", overhead)
+    #print("overhead", overhead)
 
     time.sleep(max(0, (delay / 1000) - overhead))
+
 
 def get_and_play():
     GIF_URL = "http://192.168.1.10:8000"
