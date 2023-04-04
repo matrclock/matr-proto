@@ -29,19 +29,16 @@ MATRIX = rgbmatrix.RGBMatrix(
 
 # Associate matrix with a Display to use displayio features
 
-GIF_URL = "http://192.168.1.10:8000"
-r = requests.request("GET", GIF_URL)
-IN_MEM_GIF = IterStream(r.iter_content(256))
+
 #IN_MEM_GIF = io.BytesIO(r.content)
 #r.close()
 
-GIF = GIFImage(IN_MEM_GIF, bitmap=displayio.Bitmap, palette=displayio.Palette)
 
 DISPLAY = framebufferio.FramebufferDisplay(MATRIX, auto_refresh=True)
 
 GROUP = displayio.Group()
 TILEGRID = displayio.TileGrid(
-    displayio.Bitmap(64,32,1), pixel_shader=GIF.palette,
+    displayio.Bitmap(64,32,1), pixel_shader=displayio.Palette(1),
     width=1,
     height=1,
 )
@@ -50,35 +47,33 @@ GROUP.append(TILEGRID)
 DISPLAY.show(GROUP)
 DISPLAY.refresh()
 
+def play_next_frame(gif, gif_stream):
+    start = time.monotonic()
 
+    delay = gif.read_next_frame(gif_stream)
+    TILEGRID.bitmap = gif.frame.bitmap
+    TILEGRID.pixel_shader = gif.palette
+    mem_before = gc.mem_free()
+    gc.collect()
+    print(mem_before, '>', gc.mem_free())
+
+    end = time.monotonic()
+    overhead = end - start
+    print("overhead", overhead)
+
+    time.sleep(max(0, (delay / 1000) - overhead))
+
+def get_and_play():
+    GIF_URL = "http://192.168.1.10:8000"
+    r = requests.request("GET", GIF_URL)
+    GIF_STREAM = IterStream(r.iter_content(256))
+    GIF = GIFImage(GIF_STREAM, bitmap=displayio.Bitmap, palette=displayio.Palette)
+    while GIF.has_more_frames:
+        play_next_frame(GIF, GIF_STREAM)
+    r.close()
 
 while True:
-    while GIF.has_more_frames:
-
-        start = time.monotonic()
-
-        delay = GIF.read_next_frame(IN_MEM_GIF)
-        TILEGRID.bitmap = GIF.frame.bitmap
-        mem_before = gc.mem_free()
-        gc.collect()
-        print(mem_before, '>', gc.mem_free())
-
-        end = time.monotonic()
-        overhead = end - start
-        print("overhead", overhead)
-
-        time.sleep(max(0, (delay / 1000) - overhead))
-
-       
-
-
-        """
-        r = requests.get(GIF_URL)
-        print('fetching a rug')
-        GIF = GIFImage(io.BytesIO(r.content), bitmap=displayio.Bitmap, palette=displayio.Palette)
-        r.close()
-        """
-
+    get_and_play()
 
 
 
