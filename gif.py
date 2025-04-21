@@ -1,4 +1,5 @@
 import struct
+import gc
 
 def read_blockstream(f):
     while True:
@@ -22,7 +23,7 @@ class LZWDict:
     def clear(self):
         self.last = b''
         self.code_len = self.code_size + 1
-        self.codes[:] = []
+        self.codes[:].clear()
 
     def decode(self, code):
         if code == self.clear_code:
@@ -71,6 +72,8 @@ class Extension:
         self.type = f.read(1)[0]
         # 0x01 = label, 0xfe = comment
         self.data = bytes(read_blockstream(f))
+        print('extended', self.data)
+
 
 class Frame:
     def __init__(self, f, bitmap, palette, colors, delay):
@@ -91,13 +94,16 @@ class Frame:
         x = 0
         y = 0
 
+        print('> Decode ', gc.mem_free())
         for decoded in lzw_decode(read_blockstream(f), self.min_code_sz):
+            #gc.collect()
             for byte in decoded:
                 self.bitmap[x, y] = byte
                 x += 1
                 if (x >= self.w):
                     x = 0
                     y += 1
+        print(' < Decode', gc.mem_free())
 
     def read_palette(self, f):
         self.palette = self.palette_class(self.palette_size)
@@ -133,7 +139,8 @@ class GIFImage:
                 self.has_more_frames = False
                 break
             else:
-                raise ValueError('Bad block {0:2x}'.format(block_type))
+                pass
+                #raise ValueError('Bad block {0:2x}'.format(block_type))
         return delay
 
     def read_palette(self, f):
