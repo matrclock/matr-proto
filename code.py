@@ -48,7 +48,7 @@ DISPLAY.refresh()
 def collect():
     mem_before = gc.mem_free()
     gc.collect()
-    # print(mem_before, '>', gc.mem_free())
+    print(mem_before, '>', gc.mem_free())
 
 def play_next_frame(gif, gif_stream):
     start = time.monotonic()
@@ -62,7 +62,6 @@ def play_next_frame(gif, gif_stream):
     end = time.monotonic()
     overhead = end - start
 
-    print(delay)
     time.sleep(max(0, (delay / 1000) - overhead))
 
 def get_and_play():
