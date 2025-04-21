@@ -3,11 +3,19 @@ import gc
 
 def read_blockstream(f):
     while True:
-        size = f.read(1)[0]
+        size_bytes = f.read(1)
+        if not size_bytes:
+            break  # Reached EOF or broken stream
+
+        size = size_bytes[0]
         if size == 0:
             break
-        for _ in range(size):
-            yield f.read(1)[0]
+
+        chunk = f.read(size)
+        if not chunk or len(chunk) != size:
+            break  # Incomplete chunk, probably interrupted
+        for b in chunk:
+            yield b
 
 class EndOfData(Exception):
     pass
@@ -130,7 +138,7 @@ class GIFImage:
             if block_type == 0x21:
                 extension = Extension(f)
                 if extension.type == 0xF9:  # Graphic Control Extension
-                    delay = extension.data[1] * 10  # in milliseconds
+                    delay = struct.unpack('<H', extension.data[1:3])[0] * 10  # CORRECTED
                 del extension
                 gc.collect()
             elif block_type == 0x2C:
@@ -147,6 +155,7 @@ class GIFImage:
                 for _ in read_blockstream(f):
                     pass
                 gc.collect()
+        print("Frame delay:", delay)
         return delay
 
     def read_palette(self, f):
