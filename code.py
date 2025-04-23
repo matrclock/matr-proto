@@ -36,28 +36,35 @@ TILEGRID = displayio.TileGrid(
     displayio.Bitmap(width_value, height_value, 1), pixel_shader=displayio.Palette(1)
 )
 GROUP.append(TILEGRID)
-DISPLAY.root_group = GROUP  # Updated for CP9+
+DISPLAY.root_group = GROUP
 DISPLAY.refresh()
 
 # --- Utilities ---
 
-def collect(tag=""):
+def collect():
     mem_before = gc.mem_free()
     gc.collect()
-    mem_after = gc.mem_free()
-    print(f"{tag} GC: {mem_before} > {mem_after}")
+    print(mem_before, '>', gc.mem_free())
 
 def play_next_frame(gif, gif_stream):
     start = time.monotonic()
     delay = gif.read_next_frame(gif_stream)
     TILEGRID.bitmap = gif.frame.bitmap
-    TILEGRID.pixel_shader = gif.palette
+    TILEGRID.pixel_shader = gif.frame.palette
     overhead = time.monotonic() - start
     time.sleep(max(0, (delay / 1000) - overhead))
 
+SOCKET_POOL = SocketPool(radio)
+
+def socket_debug():
+    try:
+        print(f"[DEBUG] Open sockets: {len(SOCKET_POOL._sockets)}")
+    except Exception as e:
+        print("[DEBUG] Socket count error:", e)
+
 def make_requests_session():
     ssl_context = ssl.create_default_context()
-    return adafruit_requests.Session(SocketPool(radio), ssl_context=ssl_context)
+    return adafruit_requests.Session(SOCKET_POOL, ssl_context=ssl_context)
 
 def chain(first, second):
     for item in first:
@@ -65,69 +72,65 @@ def chain(first, second):
     for item in second:
         yield item
 
-def reset_wifi():
-    print("Resetting WiFi...")
-    try:
-        radio.stop_station()
-    except Exception as e:
-        print("stop_station error:", e)
-    time.sleep(0.5)
-    try:
-        radio.start_station()
-    except Exception as e:
-        print("start_station error:", e)
-    gc.collect()
-
 MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
 
+session_open_count = 0
+response_open_count = 0
+response_close_count = 0
 def fetch_gif_stream(url, retries=3):
+    global session_open_count, response_open_count, response_close_count
     for attempt in range(retries):
         session = None
         response = None
+        print(f"[DEBUG] Opened Sessions: {session_open_count}, Responses Opened: {response_open_count}, Closed: {response_close_count}")
+
         try:
             print(f"Fetching: {url} (attempt {attempt + 1})")
             session = make_requests_session()
+            session_open_count += 1
+
             response = session.get(url, stream=True)
+            response_open_count += 1
 
             chunk_iter = response.iter_content(512)
             data = bytearray()
-            max_bytes = MAX_IN_MEMORY_GIF
 
-            try:
-                while len(data) < max_bytes:
+            while len(data) < MAX_IN_MEMORY_GIF:
+                try:
                     chunk = next(chunk_iter)
                     if not chunk:
                         break
                     data.extend(chunk)
-            except StopIteration:
-                pass  # End of stream, safe to use in-memory
+                except StopIteration:
+                    break
 
-            if len(data) < max_bytes:
+            if len(data) < MAX_IN_MEMORY_GIF:
                 print(f"Loaded {len(data)} bytes into memory")
                 response.close()
+                response_close_count += 1
                 del session
-                return io.BytesIO(data), None
+                gc.collect()
+                return io.BytesIO(data), None, None
             else:
                 print("Too big for memory, falling back to streaming")
                 full_iter = SafeIterStream(chain([bytes(data)], chunk_iter))
-                return IterStream(full_iter), response
+                return IterStream(full_iter), response, session
 
         except Exception as e:
             print(f"Fetch error: {e}")
-            if "sockets" in str(e).lower():
-                reset_wifi()
-            time.sleep(1)
             try:
                 if response:
                     response.close()
-            except:
-                pass
+                    response_close_count += 1
+            except Exception as close_err:
+                print("Error closing response:", close_err)
             try:
                 if session:
                     del session
             except:
                 pass
             gc.collect()
+            time.sleep(1)
 
     raise RuntimeError("Failed to fetch after retries")
 
@@ -135,34 +138,55 @@ GIF_URL = "http://192.168.88.31:8080/clock.gif"
 
 def fetch_gif_or_fallback():
     try:
-        f, response = fetch_gif_stream(GIF_URL)
-        return f, response
+        f, response, session = fetch_gif_stream(GIF_URL)
+        return f, response, session
     except RuntimeError as e:
         print('Failed to get GIF after retries:', str(e))
         print('Using local fallback file')
         f = open("images/clouds.gif", "rb")
-        return f, None
+        return f, None, None
 
-def play_gif_stream(f, response):
+def play_gif_stream(f, response, session):
     try:
         gif = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
-        while gif.has_more_frames:
-            play_next_frame(gif, f)
+        start_time = time.monotonic()
+
+        while True:
+            while gif.has_more_frames:
+                play_next_frame(gif, f)
+
+            elapsed = time.monotonic() - start_time
+            print("Elapsed time:", elapsed)
+            if elapsed >= 10:
+                break  # Done after this full loop
+
+            try:
+                f.seek(0)
+                gif = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
+            except Exception as e:
+                print("Error restarting GIF for loop:", e)
+                break
+
     except Exception as e:
         print("Error playing GIF:", e)
     finally:
-        try:
-            if response:
+        if response:
+            try:
                 response.close()
-        except Exception as e:
-            print("Error closing stream:", e)
+                global response_close_count
+                response_close_count += 1
+            except Exception as e:
+                print("Error closing stream:", e)
+        if session:
+            try:
+                del session
+            except Exception as e:
+                print("Error deleting session:", e)
         gc.collect()
 
 # --- Main loop ---
 
 print('RAM ON BOOT:', gc.mem_free())
-
 while True:
-    f, response = fetch_gif_or_fallback()
-    play_gif_stream(f, response)
-    collect("After playback")
+    f, response, session = fetch_gif_or_fallback()
+    play_gif_stream(f, response, session)
