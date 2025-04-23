@@ -13,7 +13,6 @@ import gc
 import ssl
 import io
 
-
 # --- Display setup ---
 
 bit_depth_value = 6  # Max for RGBMatrix
@@ -37,24 +36,22 @@ TILEGRID = displayio.TileGrid(
     displayio.Bitmap(width_value, height_value, 1), pixel_shader=displayio.Palette(1)
 )
 GROUP.append(TILEGRID)
-DISPLAY.show(GROUP)
+DISPLAY.root_group = GROUP  # Updated for CP9+
 DISPLAY.refresh()
 
 # --- Utilities ---
 
-def collect():
+def collect(tag=""):
     mem_before = gc.mem_free()
     gc.collect()
-    print(mem_before, '>', gc.mem_free())
+    mem_after = gc.mem_free()
+    print(f"{tag} GC: {mem_before} > {mem_after}")
 
 def play_next_frame(gif, gif_stream):
     start = time.monotonic()
-
     delay = gif.read_next_frame(gif_stream)
     TILEGRID.bitmap = gif.frame.bitmap
     TILEGRID.pixel_shader = gif.palette
-
-    collect()
     overhead = time.monotonic() - start
     time.sleep(max(0, (delay / 1000) - overhead))
 
@@ -62,16 +59,36 @@ def make_requests_session():
     ssl_context = ssl.create_default_context()
     return adafruit_requests.Session(SocketPool(radio), ssl_context=ssl_context)
 
+def chain(first, second):
+    for item in first:
+        yield item
+    for item in second:
+        yield item
+
+def reset_wifi():
+    print("Resetting WiFi...")
+    try:
+        radio.stop_station()
+    except Exception as e:
+        print("stop_station error:", e)
+    time.sleep(0.5)
+    try:
+        radio.start_station()
+    except Exception as e:
+        print("start_station error:", e)
+    gc.collect()
+
 MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
 
 def fetch_gif_stream(url, retries=3):
     for attempt in range(retries):
+        session = None
+        response = None
         try:
             print(f"Fetching: {url} (attempt {attempt + 1})")
             session = make_requests_session()
             response = session.get(url, stream=True)
 
-            # Read just enough to decide whether to load in-memory
             chunk_iter = response.iter_content(512)
             data = bytearray()
             max_bytes = MAX_IN_MEMORY_GIF
@@ -83,60 +100,69 @@ def fetch_gif_stream(url, retries=3):
                         break
                     data.extend(chunk)
             except StopIteration:
-                pass  # End of stream, it's safe to use in-memory
+                pass  # End of stream, safe to use in-memory
 
             if len(data) < max_bytes:
                 print(f"Loaded {len(data)} bytes into memory")
                 response.close()
+                del session
                 return io.BytesIO(data), None
             else:
                 print("Too big for memory, falling back to streaming")
-                # Put initial data back into the stream (prepend)
-                full_iter = SafeIterStream(iter([bytes(data)]) + list(chunk_iter))
+                full_iter = SafeIterStream(chain([bytes(data)], chunk_iter))
                 return IterStream(full_iter), response
 
         except Exception as e:
             print(f"Fetch error: {e}")
+            if "sockets" in str(e).lower():
+                reset_wifi()
             time.sleep(1)
+            try:
+                if response:
+                    response.close()
+            except:
+                pass
+            try:
+                if session:
+                    del session
+            except:
+                pass
+            gc.collect()
 
     raise RuntimeError("Failed to fetch after retries")
 
-
-def play_gif_stream(stream):
-    gif = GIFImage(stream, bitmap=displayio.Bitmap, palette=displayio.Palette)
-    while gif.has_more_frames:
-        play_next_frame(gif, stream)
-
 GIF_URL = "http://192.168.88.31:8080/clock.gif"
 
-def get_and_play():
+def fetch_gif_or_fallback():
     try:
         f, response = fetch_gif_stream(GIF_URL)
+        return f, response
     except RuntimeError as e:
         print('Failed to get GIF after retries:', str(e))
         print('Using local fallback file')
         f = open("images/clouds.gif", "rb")
-        response = f
+        return f, None
 
+def play_gif_stream(f, response):
     try:
-        GIF = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
-        while GIF.has_more_frames:
-            play_next_frame(GIF, f)
+        gif = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
+        while gif.has_more_frames:
+            play_next_frame(gif, f)
     except Exception as e:
         print("Error playing GIF:", e)
     finally:
         try:
-            response.close()
+            if response:
+                response.close()
         except Exception as e:
             print("Error closing stream:", e)
+        gc.collect()
 
 # --- Main loop ---
 
 print('RAM ON BOOT:', gc.mem_free())
+
 while True:
-    get_and_play()
-
-
-
-
-
+    f, response = fetch_gif_or_fallback()
+    play_gif_stream(f, response)
+    collect("After playback")

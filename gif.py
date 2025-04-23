@@ -155,7 +155,6 @@ class GIFImage:
                 for _ in read_blockstream(f):
                     pass
                 gc.collect()
-        print("Frame delay:", delay)
         return delay
 
     def read_palette(self, f):
