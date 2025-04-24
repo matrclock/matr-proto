@@ -52,6 +52,7 @@ def play_next_frame(gif, gif_stream):
     TILEGRID.bitmap = gif.frame.bitmap
     TILEGRID.pixel_shader = gif.frame.palette
     overhead = time.monotonic() - start
+    print("Frame delay:", delay, "Overhead:", overhead)
     time.sleep(max(0, (delay / 1000) - overhead))
 
 SOCKET_POOL = SocketPool(radio)
@@ -148,9 +149,20 @@ def fetch_gif_or_fallback():
 
 def play_gif_stream(f, response, session):
     try:
-        gif = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
+        gif = GIFImage(f, displayio.Bitmap, displayio.Palette)
         start_time = time.monotonic()
 
+        # If the GIF has only one frame, show it for 10 seconds
+        gif.read_next_frame(f)
+        TILEGRID.bitmap = gif.frame.bitmap
+        TILEGRID.pixel_shader = gif.frame.palette
+
+        if not gif.has_more_frames:
+            print("Single-frame GIF detected. Holding for 10 seconds...")
+            time.sleep(10)
+            return
+
+        # Otherwise, play all frames in a loop until 10 seconds have passed
         while True:
             while gif.has_more_frames:
                 play_next_frame(gif, f)
@@ -158,11 +170,11 @@ def play_gif_stream(f, response, session):
             elapsed = time.monotonic() - start_time
             print("Elapsed time:", elapsed)
             if elapsed >= 10:
-                break  # Done after this full loop
+                break
 
             try:
                 f.seek(0)
-                gif = GIFImage(f, bitmap=displayio.Bitmap, palette=displayio.Palette)
+                gif = GIFImage(f, displayio.Bitmap, displayio.Palette)
             except Exception as e:
                 print("Error restarting GIF for loop:", e)
                 break
