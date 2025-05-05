@@ -5,17 +5,21 @@ import rgbmatrix
 import time
 from wifi import radio
 from socketpool import SocketPool
-from gif import GIFImage
+from bin import BINImage  # Import your new BIN decoder
 from lib.safe_iter_stream import SafeIterStream
 from lib.iter_stream import IterStream
 import adafruit_requests
 import gc
 import ssl
 import io
+import microcontroller
+
+BOOT_TIME = time.monotonic()
+REBOOT_INTERVAL = 60 * 60  # 60 minutes in seconds
 
 # --- Display setup ---
 
-bit_depth_value = 6  # Max for RGBMatrix
+bit_depth_value = 3  # Max for RGBMatrix
 width_value = 64
 height_value = 32
 
@@ -46,14 +50,30 @@ def collect():
     gc.collect()
     print(mem_before, '>', gc.mem_free())
 
-def play_next_frame(gif, gif_stream):
+def play_next_frame(bin_image):
     start = time.monotonic()
-    delay = gif.read_next_frame(gif_stream)
-    TILEGRID.bitmap = gif.frame.bitmap
-    TILEGRID.pixel_shader = gif.frame.palette
+
+    # Debug memory usage before frame load
+    mem_before = gc.mem_free()
+
+    frame, delay = bin_image.read_next_frame()
+
+    if frame is None:
+        print("End of stream or no frame available.")
+        return False  # Signal to stop
+
+    # Debug memory usage after frame load
+
+    TILEGRID.bitmap = frame.bitmap
+    TILEGRID.pixel_shader = bin_image.palette
+
     overhead = time.monotonic() - start
-    print("Frame delay:", delay, "Overhead:", overhead)
+    print("Delay:", delay, "FPS:", round(1/overhead))
+
     time.sleep(max(0, (delay / 1000) - overhead))
+    gc.collect()
+
+    return True
 
 SOCKET_POOL = SocketPool(radio)
 
@@ -78,7 +98,8 @@ MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
 session_open_count = 0
 response_open_count = 0
 response_close_count = 0
-def fetch_gif_stream(url, retries=3):
+
+def fetch_bin_stream(url, retries=3):
     global session_open_count, response_open_count, response_close_count
     for attempt in range(retries):
         session = None
@@ -135,52 +156,36 @@ def fetch_gif_stream(url, retries=3):
 
     raise RuntimeError("Failed to fetch after retries")
 
-GIF_URL = "http://192.168.88.31:8080/clock.gif"
+BIN_URL = "http://192.168.88.31:8080/clock.bin"
 
-def fetch_gif_or_fallback():
+def fetch_bin_or_fallback():
     try:
-        f, response, session = fetch_gif_stream(GIF_URL)
+        f, response, session = fetch_bin_stream(BIN_URL)
         return f, response, session
     except RuntimeError as e:
-        print('Failed to get GIF after retries:', str(e))
+        print('Failed to get BIN after retries:', str(e))
         print('Using local fallback file')
-        f = open("images/clouds.gif", "rb")
+        f = open("images/clouds.bin", "rb")
         return f, None, None
 
-def play_gif_stream(f, response, session):
+def play_bin_stream(f, response, session):
+    print("Playing BIN stream...")
+    print("RAM before playing:", gc.mem_free())
+
     try:
-        gif = GIFImage(f, displayio.Bitmap, displayio.Palette)
+        collect()
+
+        bin_image = BINImage(f, displayio.Bitmap, displayio.Palette, loop=False)
         start_time = time.monotonic()
 
-        # If the GIF has only one frame, show it for 10 seconds
-        gif.read_next_frame(f)
-        TILEGRID.bitmap = gif.frame.bitmap
-        TILEGRID.pixel_shader = gif.frame.palette
-
-        if not gif.has_more_frames:
-            print("Single-frame GIF detected. Holding for 10 seconds...")
-            time.sleep(10)
-            return
-
-        # Otherwise, play all frames in a loop until 10 seconds have passed
         while True:
-            while gif.has_more_frames:
-                play_next_frame(gif, f)
-
-            elapsed = time.monotonic() - start_time
-            print("Elapsed time:", elapsed)
-            if elapsed >= 10:
-                break
-
-            try:
-                f.seek(0)
-                gif = GIFImage(f, displayio.Bitmap, displayio.Palette)
-            except Exception as e:
-                print("Error restarting GIF for loop:", e)
+            ok = play_next_frame(bin_image)
+            if not ok:
+                print("Finished streaming all frames.")
                 break
 
     except Exception as e:
-        print("Error playing GIF:", e)
+        print("Error playing BIN:", e)
     finally:
         if response:
             try:
@@ -194,11 +199,15 @@ def play_gif_stream(f, response, session):
                 del session
             except Exception as e:
                 print("Error deleting session:", e)
-        gc.collect()
+        collect()
 
 # --- Main loop ---
 
 print('RAM ON BOOT:', gc.mem_free())
 while True:
-    f, response, session = fetch_gif_or_fallback()
-    play_gif_stream(f, response, session)
+    if time.monotonic() - BOOT_TIME > REBOOT_INTERVAL:
+        print("Rebooting after 60 minutes...")
+        microcontroller.reset()
+
+    f, response, session = fetch_bin_or_fallback()
+    play_bin_stream(f, response, session)
