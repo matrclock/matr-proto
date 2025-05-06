@@ -50,7 +50,16 @@ def collect():
     gc.collect()
     print(mem_before, '>', gc.mem_free())
 
+# Add global variables to keep track of total overhead and frame count
+total_overhead = 0
+frame_count = 0
+
+total_overhead = 0
+frame_count = 0
+
 def play_next_frame(bin_image):
+    global total_overhead, frame_count
+
     start = time.monotonic()
 
     # Debug memory usage before frame load
@@ -71,7 +80,16 @@ def play_next_frame(bin_image):
     TILEGRID.pixel_shader = bin_image.palette
 
     overhead = time.monotonic() - start
-    print("Delay:", delay, "FPS:", round(1/overhead))
+    total_overhead += overhead  # Accumulate the total overhead
+    frame_count += 1  # Increment frame count
+
+    # Calculate average overhead and print debug info
+    if frame_count > 0:
+        average_overhead = total_overhead / frame_count  # Calculate average overhead in seconds
+        print("DelayMS:", delay, 
+              "OverheadMS:", overhead * 1000, 
+              "ActualDelayMS:", delay - overhead * 1000,
+              "AverageOverheadMS:", average_overhead * 1000)
 
     time.sleep(max(0, (delay / 1000) - overhead))
 
