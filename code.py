@@ -13,9 +13,15 @@ import gc
 import ssl
 import io
 import microcontroller
+import supervisor
 
 BOOT_TIME = time.monotonic()
 REBOOT_INTERVAL = 60 * 60  # 60 minutes in seconds
+
+if supervisor.runtime.usb_connected is False:
+    ENV="production"
+else:
+    ENV="development"
 
 # --- Display setup ---
 
@@ -62,9 +68,6 @@ def play_next_frame(bin_image):
 
     start = time.monotonic()
 
-    # Debug memory usage before frame load
-    mem_before = gc.mem_free()
-
     # Read next frame and handle the case where it's None
     result = bin_image.read_next_frame()
 
@@ -75,8 +78,7 @@ def play_next_frame(bin_image):
     # Unpack the frame and delay
     frame, delay = result
 
-    # Debug memory usage after frame load
-    TILEGRID.bitmap = frame.bitmap
+    TILEGRID.bitmap = frame.bitmap  # or copy pixels
     TILEGRID.pixel_shader = bin_image.palette
 
     overhead = time.monotonic() - start
@@ -87,9 +89,8 @@ def play_next_frame(bin_image):
     if frame_count > 0:
         average_overhead = total_overhead / frame_count  # Calculate average overhead in seconds
         print("DelayMS:", delay, 
-              "OverheadMS:", overhead * 1000, 
-              "ActualDelayMS:", delay - overhead * 1000,
               "AverageOverheadMS:", average_overhead * 1000)
+        
 
     time.sleep(max(0, (delay / 1000) - overhead))
 
@@ -177,7 +178,12 @@ def fetch_bin_stream(url, retries=3):
 
     raise RuntimeError("Failed to fetch after retries")
 
-BIN_URL = "http://192.168.88.31:8080/clock.bin"
+if ENV == "production":
+    # Production URL
+    BIN_URL = "http://clock.funkadelic.net/clock.bin"
+else:
+    # Development URL
+    BIN_URL = "http://192.168.88.31:8080/clock.bin"
 
 def fetch_bin_or_fallback():
     try:
