@@ -19,7 +19,7 @@ REBOOT_INTERVAL = 60 * 60  # 60 minutes in seconds
 
 # --- Display setup ---
 
-bit_depth_value = 3  # Max for RGBMatrix
+bit_depth_value = 6  # Max for RGBMatrix
 width_value = 64
 height_value = 32
 
@@ -56,14 +56,17 @@ def play_next_frame(bin_image):
     # Debug memory usage before frame load
     mem_before = gc.mem_free()
 
-    frame, delay = bin_image.read_next_frame()
+    # Read next frame and handle the case where it's None
+    result = bin_image.read_next_frame()
 
-    if frame is None:
+    if result is None:
         print("End of stream or no frame available.")
         return False  # Signal to stop
 
-    # Debug memory usage after frame load
+    # Unpack the frame and delay
+    frame, delay = result
 
+    # Debug memory usage after frame load
     TILEGRID.bitmap = frame.bitmap
     TILEGRID.pixel_shader = bin_image.palette
 
@@ -71,7 +74,6 @@ def play_next_frame(bin_image):
     print("Delay:", delay, "FPS:", round(1/overhead))
 
     time.sleep(max(0, (delay / 1000) - overhead))
-    gc.collect()
 
     return True
 
@@ -135,6 +137,7 @@ def fetch_bin_stream(url, retries=3):
                 return io.BytesIO(data), None, None
             else:
                 print("Too big for memory, falling back to streaming")
+                collect()
                 full_iter = SafeIterStream(chain([bytes(data)], chunk_iter))
                 return IterStream(full_iter), response, session
 
@@ -177,7 +180,6 @@ def play_bin_stream(f, response, session):
 
         bin_image = BINImage(f, displayio.Bitmap, displayio.Palette, loop=False)
         start_time = time.monotonic()
-
         while True:
             ok = play_next_frame(bin_image)
             if not ok:

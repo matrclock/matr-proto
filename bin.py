@@ -36,15 +36,21 @@ class BINImage:
         self.finished = False
 
         # Read header
-        header = f.read(3)
+        header = f.read(4)
+        if len(header) < 4:
+            raise ValueError("Incomplete header")
+        
         self.w = header[0]
         self.h = header[1]
-        self.frame_count = header[2]
+        self.frame_count = struct.unpack('<H', header[2:4])[0]
 
         # Read fixed 256-color palette
         self.palette = palette_class(256)
         for i in range(256):
-            r, g, b = struct.unpack('BBB', f.read(3))
+            rgb = f.read(3)
+            if len(rgb) < 3:
+                raise ValueError("Incomplete palette")
+            r, g, b = struct.unpack('BBB', rgb)
             self.palette[i] = (r << 16) | (g << 8) | b
 
         self.frames_read = 0
