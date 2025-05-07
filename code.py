@@ -12,16 +12,21 @@ import adafruit_requests
 import gc
 import ssl
 import io
-import microcontroller
+import os
+import wifi
 import supervisor
 
-BOOT_TIME = time.monotonic()
-REBOOT_INTERVAL = 60 * 60  # 60 minutes in seconds
+from microcontroller import watchdog as w
+from watchdog import WatchDogMode
+w.timeout=7.9 # Set a timeout of 2.5 seconds
+w.mode = WatchDogMode.RESET
+w.feed()
 
-if supervisor.runtime.usb_connected is False:
-    ENV="production"
-else:
-    ENV="development"
+WIFI_SSID = os.getenv("CIRCUITPY_WIFI_SSID")
+WIFI_PASSWORD = os.getenv("CIRCUITPY_WIFI_PASSWORD")
+BIN_URL_DEV = os.getenv("BIN_URL_DEV")
+BIN_URL_PROD = os.getenv("BIN_URL_PROD")
+print(WIFI_PASSWORD)
 
 # --- Display setup ---
 
@@ -64,6 +69,7 @@ total_overhead = 0
 frame_count = 0
 
 def play_next_frame(bin_image):
+    w.feed()  # Feed the watchdog
     global total_overhead, frame_count
 
     start = time.monotonic()
@@ -86,13 +92,23 @@ def play_next_frame(bin_image):
     frame_count += 1  # Increment frame count
 
     # Calculate average overhead and print debug info
-    if frame_count > 0:
+    if frame_count % 20 == 0 or delay > 1000:
         average_overhead = total_overhead / frame_count  # Calculate average overhead in seconds
         print("DelayMS:", delay, 
               "AverageOverheadMS:", average_overhead * 1000)
         
-
-    time.sleep(max(0, (delay / 1000) - overhead))
+    actualDelay = max(0, (delay / 1000) - overhead)
+    
+    while actualDelay > 0:
+        if actualDelay > 5:
+            print("Long delay, feeding watchdog every 5 seconds")
+            w.feed()  # Feed the watchdog
+            time.sleep(5)
+            actualDelay = actualDelay - 5
+        else:
+            w.feed()  # Feed the watchdog
+            time.sleep(actualDelay)
+            actualDelay = 0
 
     return True
 
@@ -121,6 +137,7 @@ response_open_count = 0
 response_close_count = 0
 
 def fetch_bin_stream(url, retries=3):
+
     global session_open_count, response_open_count, response_close_count
     for attempt in range(retries):
         session = None
@@ -178,14 +195,33 @@ def fetch_bin_stream(url, retries=3):
 
     raise RuntimeError("Failed to fetch after retries")
 
-if ENV == "production":
-    # Production URL
-    BIN_URL = "http://clock.funkadelic.net/clock.bin"
-else:
-    # Development URL
-    BIN_URL = "http://192.168.88.31:8080/clock.bin"
+def check_wifi():
+    print("Checking WiFi connection...")
+    gateway = wifi.radio.ipv4_gateway
+    rtt = wifi.radio.ping(gateway, timeout=1)
+    if rtt > 1:
+        print("WiFi connection poor, trying to reconnect...")
+        wifi.radio.connect(WIFI_SSID, WIFI_PASSWORD)
+        print("Reconnected to WiFi")
+    else:
+        print("WiFi connection is good")
+        print("RTT:", rtt, "s")
 
 def fetch_bin_or_fallback():
+    check_wifi()
+
+    if supervisor.runtime.usb_connected is False:
+        ENV="production"
+    else: 
+        ENV="development"
+
+    if ENV == "production":
+        # Production URL
+        BIN_URL = BIN_URL_PROD
+    else:
+        # Development URL
+        BIN_URL = BIN_URL_DEV
+
     try:
         f, response, session = fetch_bin_stream(BIN_URL)
         return f, response, session
@@ -231,9 +267,5 @@ def play_bin_stream(f, response, session):
 
 print('RAM ON BOOT:', gc.mem_free())
 while True:
-    if time.monotonic() - BOOT_TIME > REBOOT_INTERVAL:
-        print("Rebooting after 60 minutes...")
-        microcontroller.reset()
-
     f, response, session = fetch_bin_or_fallback()
     play_bin_stream(f, response, session)
