@@ -8,14 +8,17 @@ from lib.safe_iter_stream import SafeIterStream
 from lib.iter_stream import IterStream
 import io
 import gc
-from lib.utils import get_url, make_requests_session, check_wifi, collect, cleanup_session
-from lib.time import set_rtc
+from lib.utils import get_url, make_requests_session, check_wifi, collect, cleanup_session, is_dev
 
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
-w.timeout=7.9 # Set a timeout of 2.5 seconds
-w.mode = WatchDogMode.RESET
-w.feed()
+
+if not is_dev():
+    w.timeout=7.9 # Set a timeout of 2.5 seconds
+    w.mode = WatchDogMode.RESET
+    w.feed()
+else:
+    print("DEV MODE, not setting watchdog")
 
 
 MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
@@ -84,13 +87,13 @@ def play_next_frame(bin_image):
     actualDelay = max(0.01, (delay / 1000) - overhead)
     
     while actualDelay > 0:
+        w.feed()  # Feed the watchdog
+
         if actualDelay > 5:
             print("Long delay, feeding watchdog every 5 seconds")
-            w.feed()  # Feed the watchdog
             time.sleep(5)
             actualDelay = actualDelay - 5
         else:
-            w.feed()  # Feed the watchdog
             time.sleep(actualDelay)
             actualDelay = 0
 
@@ -187,7 +190,6 @@ def start_loop():
 def main():
     print('RAM ON BOOT:', gc.mem_free())
     print("URL:", get_url())
-    set_rtc()
     start_loop()
 
 main()

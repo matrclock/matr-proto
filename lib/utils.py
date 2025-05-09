@@ -14,6 +14,10 @@ URL_PROD = os.getenv("URL_PROD")
 WIFI_SSID = os.getenv("CIRCUITPY_WIFI_SSID")
 WIFI_PASSWORD = os.getenv("CIRCUITPY_WIFI_PASSWORD")
 
+def is_dev():
+    return supervisor.runtime.usb_connected
+
+
 def make_requests_session():
     ssl_context = ssl.create_default_context()
     return adafruit_requests.Session(SOCKET_POOL, ssl_context=ssl_context)
