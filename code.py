@@ -3,18 +3,12 @@ import displayio
 import framebufferio
 import rgbmatrix
 import time
-from wifi import radio
-from socketpool import SocketPool
 from bin import BINImage  # Import your new BIN decoder
 from lib.safe_iter_stream import SafeIterStream
 from lib.iter_stream import IterStream
-import adafruit_requests
-import gc
-import ssl
 import io
-import os
-import wifi
-import supervisor
+import gc
+from lib.utils import get_url, make_requests_session, check_wifi, collect, cleanup_session
 
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
@@ -22,11 +16,8 @@ w.timeout=7.9 # Set a timeout of 2.5 seconds
 w.mode = WatchDogMode.RESET
 w.feed()
 
-WIFI_SSID = os.getenv("CIRCUITPY_WIFI_SSID")
-WIFI_PASSWORD = os.getenv("CIRCUITPY_WIFI_PASSWORD")
-BIN_URL_DEV = os.getenv("BIN_URL_DEV")
-BIN_URL_PROD = os.getenv("BIN_URL_PROD")
-print(WIFI_PASSWORD)
+
+MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
 
 # --- Display setup ---
 
@@ -56,15 +47,7 @@ DISPLAY.refresh()
 
 # --- Utilities ---
 
-def collect():
-    mem_before = gc.mem_free()
-    gc.collect()
-    print(mem_before, '>', gc.mem_free())
-
 # Add global variables to keep track of total overhead and frame count
-total_overhead = 0
-frame_count = 0
-
 total_overhead = 0
 frame_count = 0
 
@@ -97,7 +80,7 @@ def play_next_frame(bin_image):
         print("DelayMS:", delay, 
               "AverageOverheadMS:", average_overhead * 1000)
         
-    actualDelay = max(0, (delay / 1000) - overhead)
+    actualDelay = max(0.01, (delay / 1000) - overhead)
     
     while actualDelay > 0:
         if actualDelay > 5:
@@ -112,45 +95,23 @@ def play_next_frame(bin_image):
 
     return True
 
-SOCKET_POOL = SocketPool(radio)
-
-def socket_debug():
-    try:
-        print(f"[DEBUG] Open sockets: {len(SOCKET_POOL._sockets)}")
-    except Exception as e:
-        print("[DEBUG] Socket count error:", e)
-
-def make_requests_session():
-    ssl_context = ssl.create_default_context()
-    return adafruit_requests.Session(SOCKET_POOL, ssl_context=ssl_context)
-
 def chain(first, second):
     for item in first:
         yield item
     for item in second:
         yield item
 
-MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
-
-session_open_count = 0
-response_open_count = 0
-response_close_count = 0
-
 def fetch_bin_stream(url, retries=3):
 
-    global session_open_count, response_open_count, response_close_count
     for attempt in range(retries):
         session = None
         response = None
-        print(f"[DEBUG] Opened Sessions: {session_open_count}, Responses Opened: {response_open_count}, Closed: {response_close_count}")
 
         try:
             print(f"Fetching: {url} (attempt {attempt + 1})")
             session = make_requests_session()
-            session_open_count += 1
 
             response = session.get(url, stream=True)
-            response_open_count += 1
 
             chunk_iter = response.iter_content(512)
             data = bytearray()
@@ -167,7 +128,6 @@ def fetch_bin_stream(url, retries=3):
             if len(data) < MAX_IN_MEMORY_GIF:
                 print(f"Loaded {len(data)} bytes into memory")
                 response.close()
-                response_close_count += 1
                 del session
                 gc.collect()
                 return io.BytesIO(data), None, None
@@ -179,51 +139,13 @@ def fetch_bin_stream(url, retries=3):
 
         except Exception as e:
             print(f"Fetch error: {e}")
-            try:
-                if response:
-                    response.close()
-                    response_close_count += 1
-            except Exception as close_err:
-                print("Error closing response:", close_err)
-            try:
-                if session:
-                    del session
-            except:
-                pass
-            gc.collect()
-            time.sleep(1)
 
     raise RuntimeError("Failed to fetch after retries")
 
-def check_wifi():
-    print("Checking WiFi connection...")
-    gateway = wifi.radio.ipv4_gateway
-    rtt = wifi.radio.ping(gateway, timeout=1)
-    if rtt > 1:
-        print("WiFi connection poor, trying to reconnect...")
-        wifi.radio.connect(WIFI_SSID, WIFI_PASSWORD)
-        print("Reconnected to WiFi")
-    else:
-        print("WiFi connection is good")
-        print("RTT:", rtt, "s")
-
-def fetch_bin_or_fallback():
-    check_wifi()
-
-    if supervisor.runtime.usb_connected is False:
-        ENV="production"
-    else: 
-        ENV="development"
-
-    if ENV == "production":
-        # Production URL
-        BIN_URL = BIN_URL_PROD
-    else:
-        # Development URL
-        BIN_URL = BIN_URL_DEV
-
+def fetch_bin():
+    url = get_url()
     try:
-        f, response, session = fetch_bin_stream(BIN_URL)
+        f, response, session = fetch_bin_stream(url + "/clock.bin")
         return f, response, session
     except RuntimeError as e:
         print('Failed to get BIN after retries:', str(e))
@@ -232,8 +154,7 @@ def fetch_bin_or_fallback():
         return f, None, None
 
 def play_bin_stream(f, response, session):
-    print("Playing BIN stream...")
-    print("RAM before playing:", gc.mem_free())
+    print("RAM before playing BIN:", gc.mem_free())
 
     try:
         collect()
@@ -248,24 +169,25 @@ def play_bin_stream(f, response, session):
 
     except Exception as e:
         print("Error playing BIN:", e)
-    finally:
-        if response:
-            try:
-                response.close()
-                global response_close_count
-                response_close_count += 1
-            except Exception as e:
-                print("Error closing stream:", e)
-        if session:
-            try:
-                del session
-            except Exception as e:
-                print("Error deleting session:", e)
-        collect()
 
-# --- Main loop ---
+def start_loop():
+    print("Starting main loop...")
+    while True:
+        try:
+            check_wifi()
+            f, response, session = fetch_bin()
+            play_bin_stream(f, response, session)
+        except Exception as e:
+            print("Error in main loop:", e)
+            time.sleep(1)  # Wait before retrying
+        finally:
+            cleanup_session(response, session)
 
-print('RAM ON BOOT:', gc.mem_free())
-while True:
-    f, response, session = fetch_bin_or_fallback()
-    play_bin_stream(f, response, session)
+def main():
+    print('RAM ON BOOT:', gc.mem_free())
+    print("URL:", get_url())
+    start_loop()
+
+main()
+
+
