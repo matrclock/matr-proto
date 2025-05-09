@@ -9,6 +9,7 @@ from lib.iter_stream import IterStream
 import io
 import gc
 from lib.utils import get_url, make_requests_session, check_wifi, collect, cleanup_session
+from lib.time import set_rtc
 
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
@@ -186,6 +187,7 @@ def start_loop():
 def main():
     print('RAM ON BOOT:', gc.mem_free())
     print("URL:", get_url())
+    set_rtc()
     start_loop()
 
 main()
