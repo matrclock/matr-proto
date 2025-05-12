@@ -8,7 +8,9 @@ from lib.safe_iter_stream import SafeIterStream
 from lib.iter_stream import IterStream
 import io
 import gc
+import os
 from lib.utils import get_url, make_requests_session, check_wifi, collect, cleanup_session, is_dev
+from lib.time import set_rtc, get_rtc, get_server_time
 
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
@@ -21,7 +23,7 @@ else:
     print("DEV MODE, not setting watchdog")
 
 
-MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
+MAX_IN_MEMORY_GIF = 15 * 1024  # 10 KB
 
 # --- Display setup ---
 
@@ -115,7 +117,16 @@ def fetch_bin_stream(url, retries=3):
             print(f"Fetching: {url} (attempt {attempt + 1})")
             session = make_requests_session()
 
-            response = session.get(url, stream=True)
+            headers = {
+                "matr-time": str(time.mktime(get_rtc())),
+                "matr-id": os.getenv("ID"),
+            }
+
+            response = session.request(
+                method="GET", 
+                headers=headers,
+                url=url, 
+                stream=True)
 
             chunk_iter = response.iter_content(512)
             data = bytearray()
@@ -149,7 +160,7 @@ def fetch_bin_stream(url, retries=3):
 def fetch_bin():
     url = get_url()
     try:
-        f, response, session = fetch_bin_stream(url + "/clock.bin")
+        f, response, session = fetch_bin_stream(url + "/next")
         return f, response, session
     except RuntimeError as e:
         print('Failed to get BIN after retries:', str(e))
@@ -175,11 +186,15 @@ def play_bin_stream(f, response, session):
         print("Error playing BIN:", e)
 
 def start_loop():
+    # Calculate network latency
+    print("Calculating network latency...")
     print("Starting main loop...")
     while True:
         try:
-            check_wifi()
+            #check_wifi()
+            start = time.monotonic()
             f, response, session = fetch_bin()
+            print("Fetched BIN in", time.monotonic() - start, "seconds")
             play_bin_stream(f, response, session)
         except Exception as e:
             print("Error in main loop:", e)
@@ -190,6 +205,13 @@ def start_loop():
 def main():
     print('RAM ON BOOT:', gc.mem_free())
     print("URL:", get_url())
+
+    try:
+        serverTime = get_server_time()
+        set_rtc(serverTime)
+    except Exception as e:
+        print("Error setting RTC:", e)
+
     start_loop()
 
 main()
