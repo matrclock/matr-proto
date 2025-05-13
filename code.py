@@ -23,7 +23,7 @@ else:
     print("DEV MODE, not setting watchdog")
 
 
-MAX_IN_MEMORY_GIF = 15 * 1024  # 10 KB
+MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
 
 # --- Display setup ---
 
