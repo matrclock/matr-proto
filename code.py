@@ -128,6 +128,7 @@ def fetch_bin_stream(url, retries=3):
                 url=url, 
                 stream=True)
 
+            dwell = float(response.headers.get("matr-dwell"))
             chunk_iter = response.iter_content(512)
             data = bytearray()
 
@@ -142,10 +143,8 @@ def fetch_bin_stream(url, retries=3):
 
             if len(data) < MAX_IN_MEMORY_GIF:
                 print(f"Loaded {len(data)} bytes into memory")
-                response.close()
-                del session
                 gc.collect()
-                return io.BytesIO(data), None, None
+                return io.BytesIO(data), response, session
             else:
                 print("Too big for memory, falling back to streaming")
                 collect()
@@ -176,10 +175,25 @@ def play_bin_stream(f, response, session):
 
         bin_image = BINImage(f, displayio.Bitmap, displayio.Palette, loop=False)
         start_time = time.monotonic()
+        dwell = float(response.headers.get("matr-dwell"))
+
+        deadline = start_time + dwell  # convert ms to seconds if needed
+
         while True:
+            # We'll have to deal with streaming not supporting dwell
             ok = play_next_frame(bin_image)
+            now = time.monotonic()
+            remaining_time = deadline - now
+            print("Remaining time:", remaining_time)
             if not ok:
-                print("Finished streaming all frames.")
+                if remaining_time > 0:
+                    print("[DEBUG ]Still time remaining, play it again", remaining_time)
+                    f.seek(0)  # Rewind the in-memory BIN
+                    bin_image = BINImage(f, displayio.Bitmap, displayio.Palette, loop=False)
+                    continue  # Start playing again
+
+
+                print("Finished playing all frames.")
                 break
 
     except Exception as e:
