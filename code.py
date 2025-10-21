@@ -67,7 +67,6 @@ def play_next_frame(bin_image):
     result = bin_image.read_next_frame()
 
     if result is None:
-        print("End of stream or no frame available.")
         return False  # Signal to stop
 
     # Unpack the frame and delay
@@ -120,12 +119,14 @@ def fetch_bin_stream(url, retries=3):
             headers = {
                 "matr-time": str(time.mktime(get_rtc())),
                 "matr-id": os.getenv("ID"),
+                "matr-location": os.getenv("LOCATION"),
             }
+            print(headers)
 
             response = session.request(
                 method="GET", 
                 headers=headers,
-                url=url, 
+                url=url,
                 stream=True)
 
             dwell = float(response.headers.get("matr-dwell"))
@@ -184,10 +185,8 @@ def play_bin_stream(f, response, session):
             ok = play_next_frame(bin_image)
             now = time.monotonic()
             remaining_time = deadline - now
-            print("Remaining time:", remaining_time)
             if not ok:
                 if remaining_time > 0:
-                    print("[DEBUG ]Still time remaining, play it again", remaining_time)
                     f.seek(0)  # Rewind the in-memory BIN
                     bin_image = BINImage(f, displayio.Bitmap, displayio.Palette, loop=False)
                     continue  # Start playing again
@@ -220,11 +219,11 @@ def main():
     print('RAM ON BOOT:', gc.mem_free())
     print("URL:", get_url())
 
-    try:
-        serverTime = get_server_time()
-        set_rtc(serverTime)
-    except Exception as e:
-        print("Error setting RTC:", e)
+    #try:
+    #    serverTime = get_server_time()
+    #    set_rtc(serverTime)
+    #except Exception as e:
+    #    print("Error setting RTC:", e)
 
     start_loop()
 
