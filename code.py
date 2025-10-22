@@ -11,6 +11,7 @@ import gc
 import os
 from lib.utils import get_url, make_requests_session, check_wifi, collect, cleanup_session, is_dev
 from lib.time import set_rtc, get_rtc, get_server_time
+import microcontroller
 
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
@@ -23,7 +24,11 @@ else:
     print("DEV MODE, not setting watchdog")
 
 
-MAX_IN_MEMORY_GIF = 10 * 1024  # 10 KB
+# Overclock
+microcontroller.cpus[0].frequency = 200000000
+microcontroller.cpus[1].frequency = 200000000
+
+MAX_IN_MEMORY_GIF = 30 * 1024  # 10 KB
 
 # --- Display setup ---
 
@@ -130,7 +135,7 @@ def fetch_bin_stream(url, retries=3):
                 stream=True)
 
             dwell = float(response.headers.get("matr-dwell"))
-            chunk_iter = response.iter_content(512)
+            chunk_iter = response.iter_content(1024) # 64 KB chunks
             data = bytearray()
 
             while len(data) < MAX_IN_MEMORY_GIF:
@@ -144,10 +149,10 @@ def fetch_bin_stream(url, retries=3):
 
             if len(data) < MAX_IN_MEMORY_GIF:
                 print(f"Loaded {len(data)} bytes into memory")
-                gc.collect()
+                collect()
                 return io.BytesIO(data), response, session
             else:
-                print("Too big for memory, falling back to streaming")
+                print("Too big for memory, falling back to streaming. Bytes:", len(data))
                 collect()
                 full_iter = SafeIterStream(chain([bytes(data)], chunk_iter))
                 return IterStream(full_iter), response, session
@@ -172,8 +177,6 @@ def play_bin_stream(f, response, session):
     print("RAM before playing BIN:", gc.mem_free())
 
     try:
-        collect()
-
         bin_image = BINImage(f, displayio.Bitmap, displayio.Palette, loop=False)
         start_time = time.monotonic()
         dwell = float(response.headers.get("matr-dwell"))
