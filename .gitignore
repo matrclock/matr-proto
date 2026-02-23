@@ -132,4 +132,5 @@ dmypy.json
 
 # Circuit Python settings
 settings.toml
+settings.*.toml
 .pyre/

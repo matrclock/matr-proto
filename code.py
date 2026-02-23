@@ -28,7 +28,7 @@ else:
 microcontroller.cpus[0].frequency = 200000000
 microcontroller.cpus[1].frequency = 200000000
 
-MAX_IN_MEMORY_GIF = 30 * 1024  # 10 KB
+MAX_IN_MEMORY_GIF = 30 * 1024  # 30 KB
 
 # --- Display setup ---
 
@@ -58,42 +58,38 @@ DISPLAY.refresh()
 
 # --- Utilities ---
 
-# Add global variables to keep track of total overhead and frame count
 total_overhead = 0
 frame_count = 0
 
 def play_next_frame(bin_image):
-    w.feed()  # Feed the watchdog
+    w.feed()
     global total_overhead, frame_count
 
     start = time.monotonic()
 
-    # Read next frame and handle the case where it's None
     result = bin_image.read_next_frame()
 
     if result is None:
-        return False  # Signal to stop
+        return False
 
-    # Unpack the frame and delay
     frame, delay = result
 
-    TILEGRID.bitmap = frame.bitmap  # or copy pixels
+    TILEGRID.bitmap = frame.bitmap
     TILEGRID.pixel_shader = bin_image.palette
 
     overhead = time.monotonic() - start
-    total_overhead += overhead  # Accumulate the total overhead
-    frame_count += 1  # Increment frame count
+    total_overhead += overhead
+    frame_count += 1
 
-    # Calculate average overhead and print debug info
     if frame_count % 20 == 0 or delay > 1000:
-        average_overhead = total_overhead / frame_count  # Calculate average overhead in seconds
-        print("DelayMS:", delay, 
+        average_overhead = total_overhead / frame_count
+        print("DelayMS:", delay,
               "AverageOverheadMS:", average_overhead * 1000)
-        
+
     actualDelay = max(0.01, (delay / 1000) - overhead)
-    
+
     while actualDelay > 0:
-        w.feed()  # Feed the watchdog
+        w.feed()
 
         if actualDelay > 5:
             print("Long delay, feeding watchdog every 5 seconds")
@@ -112,7 +108,6 @@ def chain(first, second):
         yield item
 
 def fetch_bin_stream(url, retries=3):
-
     for attempt in range(retries):
         session = None
         response = None
@@ -126,16 +121,18 @@ def fetch_bin_stream(url, retries=3):
                 "matr-id": os.getenv("ID"),
                 "matr-location": os.getenv("LOCATION"),
             }
-            print(headers)
 
             response = session.request(
-                method="GET", 
+                method="GET",
                 headers=headers,
                 url=url,
                 stream=True)
 
+            if response.status_code != 200:
+                raise ValueError(f"Bad status: {response.status_code}")
+
             dwell = float(response.headers.get("matr-dwell"))
-            chunk_iter = response.iter_content(1024) # 64 KB chunks
+            chunk_iter = response.iter_content(1024)
             data = bytearray()
 
             while len(data) < MAX_IN_MEMORY_GIF:
@@ -152,13 +149,14 @@ def fetch_bin_stream(url, retries=3):
                 collect()
                 return io.BytesIO(data), response, session
             else:
-                print("Too big for memory, falling back to streaming. Bytes:", len(data))
+                print("Too big for memory, streaming. Bytes:", len(data))
                 collect()
                 full_iter = SafeIterStream(chain([bytes(data)], chunk_iter))
                 return IterStream(full_iter), response, session
 
         except Exception as e:
             print(f"Fetch error: {e}")
+            cleanup_session(response, session)
 
     raise RuntimeError("Failed to fetch after retries")
 
@@ -181,19 +179,17 @@ def play_bin_stream(f, response, session):
         start_time = time.monotonic()
         dwell = float(response.headers.get("matr-dwell"))
 
-        deadline = start_time + dwell  # convert ms to seconds if needed
+        deadline = start_time + dwell
 
         while True:
-            # We'll have to deal with streaming not supporting dwell
             ok = play_next_frame(bin_image)
             now = time.monotonic()
             remaining_time = deadline - now
             if not ok:
                 if remaining_time > 0:
-                    f.seek(0)  # Rewind the in-memory BIN
+                    f.seek(0)
                     bin_image = BINImage(f, displayio.Bitmap, displayio.Palette, loop=False)
-                    continue  # Start playing again
-
+                    continue
 
                 print("Finished playing all frames.")
                 break
@@ -202,19 +198,25 @@ def play_bin_stream(f, response, session):
         print("Error playing BIN:", e)
 
 def start_loop():
-    # Calculate network latency
-    print("Calculating network latency...")
     print("Starting main loop...")
     while True:
+        # FIX 3: declare response and session before try block so finally can always see them
+        response = None
+        session = None
         try:
-            #check_wifi()
+            # FIX 7: check wifi on every iteration so dropped connections are recovered
+            try:
+                check_wifi()
+            except Exception as e:
+                print("WiFi check failed:", e)
+
             start = time.monotonic()
             f, response, session = fetch_bin()
             print("Fetched BIN in", time.monotonic() - start, "seconds")
             play_bin_stream(f, response, session)
         except Exception as e:
             print("Error in main loop:", e)
-            time.sleep(1)  # Wait before retrying
+            time.sleep(1)
         finally:
             cleanup_session(response, session)
 
@@ -231,5 +233,3 @@ def main():
     start_loop()
 
 main()
-
-
