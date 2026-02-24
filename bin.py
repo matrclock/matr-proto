@@ -24,8 +24,10 @@ class BINImage:
             r, g, b = struct.unpack('BBB', rgb)
             self.palette[i] = (r << 16) | (g << 8) | b
 
-        # Single reusable bitmap — avoids per-frame allocation
+        # Two bitmaps: write into the back one while the front is displayed,
+        # then swap. Avoids writing into a live/dirty-tracked bitmap.
         self.bitmap = bitmap_class(self.w, self.h, 256)
+        self._back = bitmap_class(self.w, self.h, 256)
         self.frames_read = 0
 
     def reset(self):
@@ -51,8 +53,8 @@ class BINImage:
                 raise ValueError("Failed to read frame delay")
             delay = struct.unpack('<H', delay_bytes)[0]
 
-            # Read full pixel buffer in one call (faster than row-by-row),
-            # then fill the reused bitmap. The ~2KB buffer is temporary.
+            # Fill the back bitmap (not currently displayed) to avoid
+            # dirty-region overhead from writing into a live bitmap.
             w, h = self.w, self.h
             pixels = self.f.read(w * h)
             if len(pixels) < w * h:
@@ -60,9 +62,11 @@ class BINImage:
             i = 0
             for y in range(h):
                 for x in range(w):
-                    self.bitmap[x, y] = pixels[i]
+                    self._back[x, y] = pixels[i]
                     i += 1
 
+            # Swap: the filled back buffer becomes the new front
+            self.bitmap, self._back = self._back, self.bitmap
             self.frames_read += 1
             return self, delay
         except Exception as e:
