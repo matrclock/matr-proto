@@ -51,15 +51,17 @@ class BINImage:
                 raise ValueError("Failed to read frame delay")
             delay = struct.unpack('<H', delay_bytes)[0]
 
-            # Read one row at a time (64 bytes) into the shared bitmap
-            # instead of buffering the full frame (2048 bytes) before writing
+            # Read full pixel buffer in one call (faster than row-by-row),
+            # then fill the reused bitmap. The ~2KB buffer is temporary.
             w, h = self.w, self.h
+            pixels = self.f.read(w * h)
+            if len(pixels) < w * h:
+                raise ValueError("Failed to read pixel data")
+            i = 0
             for y in range(h):
-                row = self.f.read(w)
-                if len(row) < w:
-                    raise ValueError("Failed to read pixel row")
                 for x in range(w):
-                    self.bitmap[x, y] = row[x]
+                    self.bitmap[x, y] = pixels[i]
+                    i += 1
 
             self.frames_read += 1
             return self, delay
