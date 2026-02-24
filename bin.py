@@ -1,4 +1,5 @@
 import struct
+import bitmaptools
 
 class BINImage:
     def __init__(self, f, bitmap_class, palette_class, loop=False):
@@ -59,11 +60,7 @@ class BINImage:
             pixels = self.f.read(w * h)
             if len(pixels) < w * h:
                 raise ValueError("Failed to read pixel data")
-            i = 0
-            for y in range(h):
-                for x in range(w):
-                    self._back[x, y] = pixels[i]
-                    i += 1
+            bitmaptools.arrayblit(self._back, pixels, x1=0, y1=0, x2=w, y2=h)
 
             # Swap: the filled back buffer becomes the new front
             self.bitmap, self._back = self._back, self.bitmap

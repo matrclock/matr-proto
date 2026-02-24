@@ -75,19 +75,30 @@ def play_next_frame(bin_image):
 
     frame, delay = result
 
-    TILEGRID.bitmap = frame.bitmap
-    TILEGRID.pixel_shader = bin_image.palette
-
     overhead = time.monotonic() - start
     total_overhead += overhead
     frame_count += 1
 
     if frame_count % 20 == 0 or delay > 1000:
+        if delay > 500:
+            print("Collect garbage during long delay")
+            collect()
         average_overhead = total_overhead / frame_count
         print("DelayMS:", delay,
               "AverageOverheadMS:", average_overhead * 1000)
 
-    actualDelay = max(0.01, (delay / 1000) - overhead)
+    actualDelay = (delay / 1000) - overhead
+
+    if actualDelay <= 0:
+        # Decode took longer than the frame's display time — skip showing it
+        return True
+
+    TILEGRID.bitmap = frame.bitmap
+    TILEGRID.pixel_shader = bin_image.palette
+
+    # Prefetch next frame's data from the network during idle sleep time
+    if hasattr(bin_image.f, 'prefetch'):
+        bin_image.f.prefetch(2050)
 
     while actualDelay > 0:
         w.feed()
@@ -132,7 +143,7 @@ def fetch_bin_stream(url, retries=3):
             if response.status_code != 200:
                 raise ValueError(f"Bad status: {response.status_code}")
 
-            chunk_iter = response.iter_content(1024)
+            chunk_iter = response.iter_content(2050)  # 2-byte delay + 64*32 pixels = one frame per chunk
 
             if FORCE_STREAMING:
                 # Skip buffering entirely — save up to MAX_IN_MEMORY_GIF bytes of RAM

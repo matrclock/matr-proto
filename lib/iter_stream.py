@@ -18,6 +18,13 @@ class IterStream:
         self._left = self._left[len(ret):]
         return ret
 
+    def prefetch(self, n_bytes):
+        while len(self._left) < n_bytes:
+            try:
+                self._left = self._left + next(self._iter)
+            except StopIteration:
+                break
+
     def read(self, n=None):
         # This is wonky, but I think it helps reduce memory fragmentation?
         l = self._l_buffer
