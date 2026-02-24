@@ -28,7 +28,8 @@ else:
 microcontroller.cpus[0].frequency = 200000000
 microcontroller.cpus[1].frequency = 200000000
 
-MAX_IN_MEMORY_GIF = 30 * 1024  # 30 KB
+MAX_IN_MEMORY_GIF = 10 * 1024  # 30 KB
+FORCE_STREAMING = True  # Force streaming even for images that fit in memory
 
 # --- Display setup ---
 
@@ -131,10 +132,14 @@ def fetch_bin_stream(url, retries=3):
             if response.status_code != 200:
                 raise ValueError(f"Bad status: {response.status_code}")
 
-            dwell = float(response.headers.get("matr-dwell"))
             chunk_iter = response.iter_content(1024)
-            data = bytearray()
 
+            if FORCE_STREAMING:
+                # Skip buffering entirely — save up to MAX_IN_MEMORY_GIF bytes of RAM
+                collect()
+                return IterStream(SafeIterStream(chunk_iter)), response, session
+
+            data = bytearray()
             while len(data) < MAX_IN_MEMORY_GIF:
                 try:
                     chunk = next(chunk_iter)
@@ -146,12 +151,15 @@ def fetch_bin_stream(url, retries=3):
 
             if len(data) < MAX_IN_MEMORY_GIF:
                 print(f"Loaded {len(data)} bytes into memory")
+                buf = io.BytesIO(data)
+                del data
                 collect()
-                return io.BytesIO(data), response, session
+                return buf, response, session
             else:
                 print("Too big for memory, streaming. Bytes:", len(data))
+                # Pass data directly (not bytes(data)) to avoid a redundant copy
+                full_iter = SafeIterStream(chain([data], chunk_iter))
                 collect()
-                full_iter = SafeIterStream(chain([bytes(data)], chunk_iter))
                 return IterStream(full_iter), response, session
 
         except Exception as e:
@@ -187,8 +195,8 @@ def play_bin_stream(f, response, session):
             remaining_time = deadline - now
             if not ok:
                 if remaining_time > 0:
-                    f.seek(0)
-                    bin_image = BINImage(f, displayio.Bitmap, displayio.Palette, loop=False)
+                    # Reset without reallocating bitmap/palette
+                    bin_image.reset()
                     continue
 
                 print("Finished playing all frames.")
@@ -196,6 +204,8 @@ def play_bin_stream(f, response, session):
 
     except Exception as e:
         print("Error playing BIN:", e)
+    finally:
+        gc.collect()
 
 def start_loop():
     print("Starting main loop...")
